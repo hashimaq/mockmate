@@ -51,11 +51,31 @@ export function mapAuthError(error: { message?: string; code?: string } | null):
     return "Network error. Check your connection and try again.";
   }
 
-  if (message.includes("rate limit") || code === "over_request_rate_limit") {
-    return "Too many attempts. Please wait a moment and try again.";
+  if (
+    message.includes("rate limit") ||
+    message.includes("too many") ||
+    message.includes("security purposes") ||
+    code === "over_request_rate_limit" ||
+    code === "over_email_send_rate_limit"
+  ) {
+    return "Too many attempts for security. Please wait about a minute, then try again.";
   }
 
   return error.message;
+}
+
+/** Collect first Zod issue per field for inline form errors. */
+export function zodFieldErrors(
+  error: { issues: Array<{ path: PropertyKey[]; message: string }> },
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = String(issue.path[0] ?? "");
+    if (key && !fields[key]) {
+      fields[key] = issue.message;
+    }
+  }
+  return fields;
 }
 
 export const REMEMBER_ME_COOKIE = "mm_remember_me";

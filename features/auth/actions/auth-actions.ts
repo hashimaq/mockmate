@@ -8,6 +8,7 @@ import {
   mapAuthError,
   REMEMBER_ME_COOKIE,
   resolvePostAuthPath,
+  zodFieldErrors,
 } from "@/features/auth/lib/auth-utils";
 import {
   forgotPasswordSchema,
@@ -33,14 +34,29 @@ export type ActionResult = {
   success: boolean;
   message?: string;
   error?: string;
+  /** Non-sensitive fields to restore after a failed submit */
+  fields?: {
+    email?: string;
+    fullName?: string;
+  };
+  fieldErrors?: Record<string, string>;
 };
+
+function formEmail(formData: FormData): string {
+  return String(formData.get("email") ?? "").trim();
+}
+
+function formFullName(formData: FormData): string {
+  return String(formData.get("fullName") ?? "").trim();
+}
 
 export async function signInAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const email = formEmail(formData);
   const parsed = loginSchema.safeParse({
-    email: formData.get("email"),
+    email,
     password: formData.get("password"),
     rememberMe: formData.get("rememberMe") === "on" || formData.get("rememberMe") === "true",
   });
@@ -48,7 +64,9 @@ export async function signInAction(
   if (!parsed.success) {
     return {
       success: false,
-      error: parsed.error.issues[0]?.message ?? "Invalid credentials",
+      error: parsed.error.issues[0]?.message ?? "Please check your details.",
+      fields: { email },
+      fieldErrors: zodFieldErrors(parsed.error),
     };
   }
 
@@ -88,6 +106,7 @@ export async function signInAction(
       error: isOwnerLogin
         ? `Invalid credentials after setup. Confirm SUPER_ADMIN_PASSWORD in .env matches what you typed, then restart the server. (${mapAuthError(error)})`
         : mapAuthError(error),
+      fields: { email: parsed.data.email },
     };
   }
 
@@ -101,6 +120,7 @@ export async function signInAction(
     return {
       success: false,
       error: "This account has been suspended. Contact support.",
+      fields: { email: parsed.data.email },
     };
   }
 
@@ -116,9 +136,11 @@ export async function signUpAction(
   _prev: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
+  const fullName = formFullName(formData);
+  const email = formEmail(formData);
   const parsed = registerSchema.safeParse({
-    fullName: formData.get("fullName"),
-    email: formData.get("email"),
+    fullName,
+    email,
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
   });
@@ -126,7 +148,9 @@ export async function signUpAction(
   if (!parsed.success) {
     return {
       success: false,
-      error: parsed.error.issues[0]?.message ?? "Invalid registration details",
+      error: parsed.error.issues[0]?.message ?? "Please check your details.",
+      fields: { fullName, email },
+      fieldErrors: zodFieldErrors(parsed.error),
     };
   }
 
@@ -143,7 +167,14 @@ export async function signUpAction(
   });
 
   if (error) {
-    return { success: false, error: mapAuthError(error) };
+    return {
+      success: false,
+      error: mapAuthError(error),
+      fields: {
+        fullName: parsed.data.fullName,
+        email: parsed.data.email,
+      },
+    };
   }
 
   // Ensure profile row exists when a session is available (DB trigger covers signup)

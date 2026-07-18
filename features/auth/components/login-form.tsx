@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useFormStatus } from "react-dom";
@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
+import { cn } from "@/lib/utils";
 
 type LoginFormProps = {
   nextPath?: string;
@@ -31,28 +32,51 @@ function SubmitButton() {
   );
 }
 
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="text-xs text-destructive" role="alert">
+      {message}
+    </p>
+  );
+}
+
 export function LoginForm({
   nextPath = "",
   initialMessage,
   initialError,
 }: LoginFormProps) {
   const [rememberMe, setRememberMe] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [state, formAction] = useActionState<ActionResult | null, FormData>(
     signInAction,
     null,
   );
 
+  // On error: keep email, clear only password
+  useEffect(() => {
+    if (!state || state.success) return;
+    if (state.fields?.email !== undefined) setEmail(state.fields.email);
+    setPassword("");
+  }, [state]);
+
   const error = state?.error ?? initialError;
   const message = state?.message ?? initialMessage;
+  const fieldErrors = state?.fieldErrors ?? {};
 
   return (
     <div>
       <GoogleAuthButton nextPath={nextPath} />
       <AuthDivider />
 
-      <form action={formAction} className="space-y-4">
+      <form action={formAction} className="space-y-4" noValidate>
         <input type="hidden" name="next" value={nextPath} />
-        <input type="hidden" name="rememberMe" value={rememberMe ? "true" : "false"} />
+        <input
+          type="hidden"
+          name="rememberMe"
+          value={rememberMe ? "true" : "false"}
+        />
 
         {error ? (
           <Alert variant="destructive">
@@ -77,7 +101,12 @@ export function LoginForm({
             autoComplete="email"
             required
             placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            aria-invalid={Boolean(fieldErrors.email)}
+            className={cn(fieldErrors.email && "border-destructive")}
           />
+          <FieldError message={fieldErrors.email} />
         </div>
 
         <div className="space-y-2">
@@ -95,8 +124,13 @@ export function LoginForm({
             name="password"
             autoComplete="current-password"
             required
-            placeholder="••••••••"
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            aria-invalid={Boolean(fieldErrors.password)}
+            className={cn(fieldErrors.password && "border-destructive")}
           />
+          <FieldError message={fieldErrors.password} />
         </div>
 
         <div className="flex items-center gap-2">
@@ -105,7 +139,10 @@ export function LoginForm({
             checked={rememberMe}
             onCheckedChange={(value) => setRememberMe(value === true)}
           />
-          <Label htmlFor="rememberMe" className="font-normal text-muted-foreground">
+          <Label
+            htmlFor="rememberMe"
+            className="font-normal text-muted-foreground"
+          >
             Remember me
           </Label>
         </div>
