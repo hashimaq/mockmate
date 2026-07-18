@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useFormStatus } from "react-dom";
@@ -8,10 +8,7 @@ import { useFormStatus } from "react-dom";
 import { signUpAction, type ActionResult } from "@/features/auth/actions/auth-actions";
 import { AuthDivider } from "@/features/auth/components/auth-divider";
 import { GoogleAuthButton } from "@/features/auth/components/google-auth-button";
-import {
-  PASSWORD_REQUIREMENTS,
-  PasswordRequirements,
-} from "@/features/auth/components/password-requirements";
+import { PasswordRequirements } from "@/features/auth/components/password-requirements";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +16,12 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { cn } from "@/lib/utils";
 
-function SubmitButton({ disabled }: { disabled?: boolean }) {
+function SubmitButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" className="w-full" disabled={disabled || pending}>
+    <Button type="submit" className="w-full" disabled={pending}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-      Create account
+      {pending ? "Creating account…" : "Create account"}
     </Button>
   );
 }
@@ -60,36 +57,31 @@ export function RegisterForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const lastErrorKey = useRef<string | null>(null);
 
-  const passwordReady = useMemo(
-    () => PASSWORD_REQUIREMENTS.every((item) => item.test(password)),
-    [password],
-  );
-  const passwordsMatch =
-    confirmPassword.length > 0 && password === confirmPassword;
-  const canSubmit =
-    fullName.trim().length >= 2 &&
-    email.includes("@") &&
-    passwordReady &&
-    passwordsMatch;
-
-  // On error: keep name/email, clear only password fields
+  // Only when a *new* server error arrives: restore name/email and clear passwords once
   useEffect(() => {
-    if (!state || state.success) return;
+    if (!state || state.success || !state.error) return;
 
-    if (state.fields?.fullName !== undefined) setFullName(state.fields.fullName);
-    if (state.fields?.email !== undefined) setEmail(state.fields.email);
+    const key = `${state.error}|${state.fields?.email ?? ""}`;
+    if (lastErrorKey.current === key) return;
+    lastErrorKey.current = key;
+
+    if (state.fields?.fullName !== undefined) {
+      setFullName(state.fields.fullName);
+    }
+    if (state.fields?.email !== undefined) {
+      setEmail(state.fields.email);
+    }
     setPassword("");
     setConfirmPassword("");
 
-    // Never strand users on a throttle error — continue to verify / sign-in path
-    const emailForNext = state.fields?.email || email;
-    if (looksLikeEmailThrottle(state.error) && emailForNext) {
+    if (looksLikeEmailThrottle(state.error) && state.fields?.email) {
       router.replace(
-        `/verify-email?email=${encodeURIComponent(emailForNext)}`,
+        `/verify-email?email=${encodeURIComponent(state.fields.email)}`,
       );
     }
-  }, [state, email, router]);
+  }, [state, router]);
 
   const fieldErrors = state?.fieldErrors ?? {};
   const errorText =
@@ -180,19 +172,14 @@ export function RegisterForm() {
             aria-invalid={Boolean(fieldErrors.confirmPassword)}
             className={cn(fieldErrors.confirmPassword && "border-destructive")}
           />
-          {confirmPassword && !passwordsMatch ? (
+          {confirmPassword && confirmPassword !== password ? (
             <FieldError message="Passwords do not match" />
           ) : (
             <FieldError message={fieldErrors.confirmPassword} />
           )}
         </div>
 
-        <SubmitButton disabled={!canSubmit} />
-        {!canSubmit ? (
-          <p className="text-center text-xs text-muted-foreground">
-            Complete all fields and password requirements to continue.
-          </p>
-        ) : null}
+        <SubmitButton />
       </form>
     </div>
   );
