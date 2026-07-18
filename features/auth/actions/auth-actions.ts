@@ -10,6 +10,7 @@ import {
   mapSignUpError,
   REMEMBER_ME_COOKIE,
   resolvePostAuthPath,
+  toErrorMessage,
   zodFieldErrors,
 } from "@/features/auth/lib/auth-utils";
 import {
@@ -140,90 +141,113 @@ export async function signUpAction(
 ): Promise<ActionResult> {
   const fullName = formFullName(formData);
   const email = formEmail(formData);
-  const parsed = registerSchema.safeParse({
-    fullName,
-    email,
-    password: formData.get("password"),
-    confirmPassword: formData.get("confirmPassword"),
-  });
 
-  if (!parsed.success) {
-    return {
-      success: false,
-      error: parsed.error.issues[0]?.message ?? "Please check your details.",
-      fields: { fullName, email },
-      fieldErrors: zodFieldErrors(parsed.error),
-    };
-  }
+  try {
+    const parsed = registerSchema.safeParse({
+      fullName,
+      email,
+      password: formData.get("password"),
+      confirmPassword: formData.get("confirmPassword"),
+    });
 
-  const origin = await getAppOrigin();
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signUp({
-    email: parsed.data.email,
-    password: parsed.data.password,
-    options: {
-      data: {
-        full_name: parsed.data.fullName,
-      },
-      emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
-    },
-  });
-
-  if (error) {
-    const message = (error.message ?? "").toLowerCase();
-    // Email already used / confirmation throttle → never show wait/security errors
-    if (
-      isAuthRateLimitError(error) ||
-      message.includes("security purposes") ||
-      message.includes("only request this after") ||
-      message.includes("already registered") ||
-      message.includes("already been registered")
-    ) {
-      redirect(
-        `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
-      );
+    if (!parsed.success) {
+      return {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Please check your details.",
+        fields: { fullName, email },
+        fieldErrors: zodFieldErrors(parsed.error),
+      };
     }
 
-    return {
-      success: false,
-      error: mapSignUpError(error),
-      fields: {
-        fullName: parsed.data.fullName,
-        email: parsed.data.email,
+    const origin = await getAppOrigin();
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.signUp({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      options: {
+        data: {
+          full_name: parsed.data.fullName,
+        },
+        emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
       },
-    };
-  }
+    });
 
-  // Ensure profile row exists when a session is available (DB trigger covers signup)
-  if (data.user && data.session) {
-    await supabase.from("profiles").upsert(
-      {
-        id: data.user.id,
-        email: parsed.data.email,
-        full_name: parsed.data.fullName,
-        role: "user",
-        status: "active",
-      },
-      { onConflict: "id" },
-    );
+    if (error) {
+      const message = toErrorMessage(error, "").toLowerCase();
+      // Email already used / confirmation throttle → never show wait/security errors
+      if (
+        isAuthRateLimitError(error) ||
+        message.includes("security purposes") ||
+        message.includes("only request this after") ||
+        message.includes("already registered") ||
+        message.includes("already been registered")
+      ) {
+        redirect(
+          `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
+        );
+      }
 
-    const profile = await getCurrentProfile();
+      return {
+        success: false,
+        error: mapSignUpError(error),
+        fields: {
+          fullName: parsed.data.fullName,
+          email: parsed.data.email,
+        },
+      };
+    }
+
+    // Ensure profile row exists when a session is available (DB trigger covers signup)
+    if (data.user && data.session) {
+      await supabase.from("profiles").upsert(
+        {
+          id: data.user.id,
+          email: parsed.data.email,
+          full_name: parsed.data.fullName,
+          role: "user",
+          status: "active",
+        },
+        { onConflict: "id" },
+      );
+
+      const profile = await getCurrentProfile();
+      void notifyAdminEvent({
+        type: "user_registered",
+        userName: parsed.data.fullName,
+        userEmail: parsed.data.email,
+      });
+
+      redirect(getHomePathForRole(profile?.role));
+    }
+
     void notifyAdminEvent({
       type: "user_registered",
       userName: parsed.data.fullName,
       userEmail: parsed.data.email,
     });
 
-    redirect(getHomePathForRole(profile?.role));
+    redirect(`/verify-email?email=${encodeURIComponent(parsed.data.email)}`);
+  } catch (error) {
+    // rethrow Next.js redirect/notFound control flow
+    if (
+      typeof error === "object" &&
+      error &&
+      "digest" in error &&
+      typeof (error as { digest?: unknown }).digest === "string" &&
+      String((error as { digest: string }).digest).startsWith("NEXT_")
+    ) {
+      throw error;
+    }
+
+    return {
+      success: false,
+      error: toErrorMessage(
+        error,
+        "Could not create your account. Please try again.",
+      ),
+      fields: { fullName, email },
+    };
   }
-
-  void notifyAdminEvent({
-    type: "user_registered",
-    userName: parsed.data.fullName,
-    userEmail: parsed.data.email,
-  });
-
-  redirect(`/verify-email?email=${encodeURIComponent(parsed.data.email)}`);
 }
 
 export async function forgotPasswordAction(

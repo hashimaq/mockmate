@@ -1,15 +1,55 @@
 import { isStaffRole } from "@/services/rbac/roles";
 
+/** Always return a human-readable string (never `{}` / empty objects). */
+export function toErrorMessage(error: unknown, fallback: string): string {
+  if (error == null) return fallback;
+
+  if (typeof error === "string") {
+    const trimmed = error.trim();
+    if (!trimmed || trimmed === "{}" || trimmed === "[object Object]") {
+      return fallback;
+    }
+    return trimmed;
+  }
+
+  if (typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    for (const key of ["message", "msg", "error_description", "error"] as const) {
+      const value = record[key];
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed && trimmed !== "{}" && trimmed !== "[object Object]") {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  if (error instanceof Error) {
+    const trimmed = error.message?.trim();
+    if (trimmed && trimmed !== "{}") return trimmed;
+  }
+
+  return fallback;
+}
+
 /**
  * Maps Supabase Auth errors to user-friendly messages.
  */
-export function mapAuthError(error: { message?: string; code?: string } | null): string {
-  if (!error?.message) {
+export function mapAuthError(error: unknown): string {
+  const raw = toErrorMessage(error, "");
+  if (!raw) {
     return "Something went wrong. Please try again.";
   }
 
-  const message = error.message.toLowerCase();
-  const code = error.code?.toLowerCase() ?? "";
+  const message = raw.toLowerCase();
+  const code =
+    typeof error === "object" &&
+    error &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code.toLowerCase()
+      : "";
 
   if (
     message.includes("invalid login credentials") ||
@@ -55,16 +95,20 @@ export function mapAuthError(error: { message?: string; code?: string } | null):
     return "Please wait a moment, then try again.";
   }
 
-  return error.message;
+  return raw;
 }
 
 /** Supabase email/auth throttle (common on repeated sign-up email sends). */
-export function isAuthRateLimitError(
-  error: { message?: string; code?: string } | null,
-): boolean {
+export function isAuthRateLimitError(error: unknown): boolean {
   if (!error) return false;
-  const message = (error.message ?? "").toLowerCase();
-  const code = (error.code ?? "").toLowerCase();
+  const message = toErrorMessage(error, "").toLowerCase();
+  const code =
+    typeof error === "object" &&
+    error &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code.toLowerCase()
+      : "";
   return (
     message.includes("rate limit") ||
     message.includes("too many") ||
@@ -76,18 +120,16 @@ export function isAuthRateLimitError(
 }
 
 /** Sign-up specific messages — no scary “security / too many attempts” copy. */
-export function mapSignUpError(
-  error: { message?: string; code?: string } | null,
-): string {
-  if (!error?.message) {
-    return "Could not create your account. Please try again.";
-  }
-
+export function mapSignUpError(error: unknown): string {
   if (isAuthRateLimitError(error)) {
     return "A verification email may already be on the way. Check your inbox, or sign in if you already registered.";
   }
 
-  return mapAuthError(error);
+  const mapped = mapAuthError(error);
+  if (!mapped || mapped === "{}" || mapped === "[object Object]") {
+    return "Could not create your account. Please try again.";
+  }
+  return mapped;
 }
 
 /** Collect first Zod issue per field for inline form errors. */

@@ -92,8 +92,14 @@ export function RegisterForm() {
   }, [state, email, router]);
 
   const fieldErrors = state?.fieldErrors ?? {};
+  const errorText =
+    typeof state?.error === "string"
+      ? state.error
+      : state?.error
+        ? "Could not create your account. Please try again."
+        : null;
   const showError =
-    state?.error && !looksLikeEmailThrottle(state.error) ? state.error : null;
+    errorText && !looksLikeEmailThrottle(errorText) ? errorText : null;
 
   return (
     <div>
