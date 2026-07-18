@@ -11,8 +11,9 @@ function mapBootstrapAuthError(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("invalid api key") || lower.includes("invalid jwt")) {
     return (
-      "Invalid SUPABASE_SERVICE_ROLE_KEY. In Supabase Dashboard → Project Settings → API, " +
-      "copy the service_role secret key into .env, then restart npm run dev."
+      "Invalid SUPABASE_SERVICE_ROLE_KEY on this deploy. In Supabase → Project Settings → API, " +
+      "copy the service_role secret, then set it in Vercel → Project Settings → Environment Variables " +
+      "(Production), and Redeploy. Local .env is not used on Vercel."
     );
   }
   return message;
@@ -61,7 +62,7 @@ export async function ensureSuperAdminAccount(): Promise<EnsureSuperAdminResult>
     return {
       ok: false,
       error:
-        "SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD is missing in .env (restart the server after editing).",
+        "SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD is missing. Set them in Vercel → Environment Variables (Production) and Redeploy.",
     };
   }
 
@@ -74,8 +75,17 @@ export async function ensureSuperAdminAccount(): Promise<EnsureSuperAdminResult>
 
   try {
     const admin = createServiceRoleClient();
-    let userId: string | null = null;
 
+    // Fail fast with a clear message if the key/project pair is wrong
+    const { error: probeError } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1,
+    });
+    if (probeError) {
+      return { ok: false, error: mapBootstrapAuthError(probeError.message) };
+    }
+
+    let userId: string | null = null;
     const existing = await findAuthUserByEmail(creds.email);
 
     if (existing) {

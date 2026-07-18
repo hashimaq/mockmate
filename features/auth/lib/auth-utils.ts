@@ -1,33 +1,70 @@
 import { isStaffRole } from "@/services/rbac/roles";
 
+function isOpaqueErrorText(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (trimmed === "{}" || trimmed === "[object Object]") return true;
+  // Supabase sometimes returns this exact opaque string
+  if (trimmed.toLowerCase() === "something went wrong. please try again.") {
+    return true;
+  }
+  return false;
+}
+
+function authErrorCode(error: unknown): string {
+  if (typeof error !== "object" || !error) return "";
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code.toLowerCase() : "";
+}
+
+function authErrorStatus(error: unknown): number | null {
+  if (typeof error !== "object" || !error) return null;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : null;
+}
+
 /** Always return a human-readable string (never `{}` / empty objects). */
 export function toErrorMessage(error: unknown, fallback: string): string {
   if (error == null) return fallback;
 
   if (typeof error === "string") {
-    const trimmed = error.trim();
-    if (!trimmed || trimmed === "{}" || trimmed === "[object Object]") {
-      return fallback;
-    }
-    return trimmed;
+    return isOpaqueErrorText(error) ? fallback : error.trim();
+  }
+
+  // Prefer Error.message before scanning other keys (AuthError is an Error).
+  if (error instanceof Error) {
+    const trimmed = error.message?.trim();
+    if (trimmed && !isOpaqueErrorText(trimmed)) return trimmed;
   }
 
   if (typeof error === "object") {
     const record = error as Record<string, unknown>;
-    for (const key of ["message", "msg", "error_description", "error"] as const) {
+    for (const key of ["message", "msg", "error_description"] as const) {
       const value = record[key];
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        if (trimmed && trimmed !== "{}" && trimmed !== "[object Object]") {
-          return trimmed;
-        }
+      if (typeof value === "string" && !isOpaqueErrorText(value)) {
+        return value.trim();
       }
     }
-  }
 
-  if (error instanceof Error) {
-    const trimmed = error.message?.trim();
-    if (trimmed && trimmed !== "{}") return trimmed;
+    // `error` is often a short machine code — only use if descriptive
+    const codeLike = record.error;
+    if (
+      typeof codeLike === "string" &&
+      !isOpaqueErrorText(codeLike) &&
+      (codeLike.includes(" ") || codeLike.length > 24)
+    ) {
+      return codeLike.trim();
+    }
+
+    const code = authErrorCode(error);
+    if (code) {
+      return code.replace(/_/g, " ");
+    }
+
+    const status = authErrorStatus(error);
+    if (status) {
+      return `Request failed (${status}). Please try again.`;
+    }
   }
 
   return fallback;
@@ -37,19 +74,9 @@ export function toErrorMessage(error: unknown, fallback: string): string {
  * Maps Supabase Auth errors to user-friendly messages.
  */
 export function mapAuthError(error: unknown): string {
+  const code = authErrorCode(error);
   const raw = toErrorMessage(error, "");
-  if (!raw) {
-    return "Something went wrong. Please try again.";
-  }
-
   const message = raw.toLowerCase();
-  const code =
-    typeof error === "object" &&
-    error &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-      ? (error as { code: string }).code.toLowerCase()
-      : "";
 
   if (
     message.includes("invalid login credentials") ||
@@ -66,13 +93,33 @@ export function mapAuthError(error: unknown): string {
   if (
     message.includes("user already registered") ||
     message.includes("already been registered") ||
-    code === "user_already_exists"
+    message.includes("already registered") ||
+    code === "user_already_exists" ||
+    code === "email_exists"
   ) {
-    return "An account with this email already exists.";
+    return "An account with this email already exists. Sign in, or check your inbox to verify.";
   }
 
-  if (message.includes("password") && message.includes("weak")) {
+  if (
+    message.includes("password") &&
+    (message.includes("weak") || message.includes("pwned") || code === "weak_password")
+  ) {
     return "Password is too weak. Use at least 8 characters with mixed case and a number.";
+  }
+
+  if (
+    message.includes("redirect") &&
+    (message.includes("not allowed") || message.includes("whitelist") || message.includes("allow"))
+  ) {
+    return "Sign-up redirect URL is not allowed in Supabase Auth settings. Add your site URL under Redirect URLs.";
+  }
+
+  if (
+    message.includes("error sending") ||
+    message.includes("confirmation email") ||
+    code === "over_email_send_rate_limit"
+  ) {
+    return "Could not send the verification email. Check spam later, or configure Supabase SMTP (Resend).";
   }
 
   if (
@@ -95,6 +142,10 @@ export function mapAuthError(error: unknown): string {
     return "Please wait a moment, then try again.";
   }
 
+  if (!raw) {
+    return "Could not complete authentication. If you already registered, try signing in or check your email.";
+  }
+
   return raw;
 }
 
@@ -102,13 +153,7 @@ export function mapAuthError(error: unknown): string {
 export function isAuthRateLimitError(error: unknown): boolean {
   if (!error) return false;
   const message = toErrorMessage(error, "").toLowerCase();
-  const code =
-    typeof error === "object" &&
-    error &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-      ? (error as { code: string }).code.toLowerCase()
-      : "";
+  const code = authErrorCode(error);
   return (
     message.includes("rate limit") ||
     message.includes("too many") ||
@@ -119,15 +164,29 @@ export function isAuthRateLimitError(error: unknown): boolean {
   );
 }
 
+/** True when this email is already in Auth (duplicate sign-up). */
+export function isAlreadyRegisteredError(error: unknown): boolean {
+  if (!error) return false;
+  const message = toErrorMessage(error, "").toLowerCase();
+  const code = authErrorCode(error);
+  return (
+    message.includes("user already registered") ||
+    message.includes("already been registered") ||
+    message.includes("already registered") ||
+    code === "user_already_exists" ||
+    code === "email_exists"
+  );
+}
+
 /** Sign-up specific messages — no scary “security / too many attempts” copy. */
 export function mapSignUpError(error: unknown): string {
-  if (isAuthRateLimitError(error)) {
+  if (isAuthRateLimitError(error) || isAlreadyRegisteredError(error)) {
     return "A verification email may already be on the way. Check your inbox, or sign in if you already registered.";
   }
 
   const mapped = mapAuthError(error);
-  if (!mapped || mapped === "{}" || mapped === "[object Object]") {
-    return "Could not create your account. Please try again.";
+  if (!mapped || isOpaqueErrorText(mapped)) {
+    return "Could not create your account. If you already registered, sign in or open the verification email.";
   }
   return mapped;
 }

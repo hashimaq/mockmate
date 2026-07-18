@@ -17,7 +17,7 @@ Redeploy after saving.
 Supabase Dashboard → **Authentication → URL Configuration**
 
 - **Site URL:** `https://mockmate-weld-iota.vercel.app`
-- **Redirect URLs** (add both):
+- **Redirect URLs** (add both — required for Google OAuth too):
   - `https://mockmate-weld-iota.vercel.app/**`
   - `https://mockmate-weld-iota.vercel.app/auth/callback`
 

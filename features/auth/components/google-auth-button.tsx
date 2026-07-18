@@ -4,7 +4,6 @@ import * as React from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { SITE_URL } from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 
 type GoogleAuthButtonProps = {
@@ -13,7 +12,7 @@ type GoogleAuthButtonProps = {
 };
 
 export function GoogleAuthButton({
-  nextPath = "",
+  nextPath = "/dashboard",
   label = "Continue with Google",
 }: GoogleAuthButtonProps) {
   const [loading, setLoading] = React.useState(false);
@@ -25,7 +24,14 @@ export function GoogleAuthButton({
 
     try {
       const supabase = createClient();
-      const redirectTo = `${SITE_URL}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+      // Always use the live page origin (Vercel / custom domain). Never bake in
+      // NEXT_PUBLIC_SITE_URL — a stale localhost value breaks production OAuth.
+      const origin = window.location.origin;
+      const safeNext =
+        nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
+          ? nextPath
+          : "/dashboard";
+      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(safeNext)}`;
 
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",

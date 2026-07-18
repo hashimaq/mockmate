@@ -15,8 +15,11 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
-  // Empty next → role-based home after login (staff → /admin, users → /dashboard)
-  const nextPath = getSafeRedirectPath(params.next, "");
+  // Empty next → role-based home after login (staff → /admin, users → /dashboard).
+  // Pass "" so email login uses resolvePostAuthPath; Google defaults to /dashboard.
+  const nextPath = params.next
+    ? getSafeRedirectPath(params.next, "/dashboard")
+    : "";
 
   let initialMessage: string | null = null;
   if (params.reset === "success") {

@@ -2,9 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 
 import {
+  isAlreadyRegisteredError,
   isAuthRateLimitError,
   mapAuthError,
   mapSignUpError,
@@ -13,6 +14,7 @@ import {
   toErrorMessage,
   zodFieldErrors,
 } from "@/features/auth/lib/auth-utils";
+import { logger } from "@/lib/monitoring/logger";
 import {
   forgotPasswordSchema,
   loginSchema,
@@ -78,13 +80,13 @@ export async function signInAction(
     !!ownerEmail &&
     parsed.data.email.trim().toLowerCase() === ownerEmail;
 
+  // Bootstrap is best-effort: if the account already exists, password login
+  // should still work even when the service role key is wrong/stale in memory.
+  let bootstrapError: string | null = null;
   if (isOwnerLogin) {
     const bootstrapped = await ensureSuperAdminAccount();
     if (!bootstrapped.ok) {
-      return {
-        success: false,
-        error: `Super admin setup failed: ${bootstrapped.error}`,
-      };
+      bootstrapError = bootstrapped.error;
     }
   }
 
@@ -104,10 +106,17 @@ export async function signInAction(
   });
 
   if (error) {
+    if (isOwnerLogin && bootstrapError) {
+      return {
+        success: false,
+        error: `Super admin setup failed: ${bootstrapError}`,
+        fields: { email: parsed.data.email },
+      };
+    }
     return {
       success: false,
       error: isOwnerLogin
-        ? `Invalid credentials after setup. Confirm SUPER_ADMIN_PASSWORD in .env matches what you typed, then restart the server. (${mapAuthError(error)})`
+        ? `Could not sign in as owner. Confirm SUPER_ADMIN_PASSWORD matches the value set in Vercel env vars, then Redeploy. (${mapAuthError(error)})`
         : mapAuthError(error),
       fields: { email: parsed.data.email },
     };
@@ -173,15 +182,26 @@ export async function signUpAction(
     });
 
     if (error) {
-      const message = toErrorMessage(error, "").toLowerCase();
-      // Email already used / confirmation throttle → never show wait/security errors
-      if (
-        isAuthRateLimitError(error) ||
-        message.includes("security purposes") ||
-        message.includes("only request this after") ||
-        message.includes("already registered") ||
-        message.includes("already been registered")
-      ) {
+      logger.warn("signUpAction auth error", {
+        message: toErrorMessage(error, ""),
+        code:
+          typeof error === "object" &&
+          error &&
+          "code" in error &&
+          typeof (error as { code?: unknown }).code === "string"
+            ? (error as { code: string }).code
+            : undefined,
+        status:
+          typeof error === "object" &&
+          error &&
+          "status" in error &&
+          typeof (error as { status?: unknown }).status === "number"
+            ? (error as { status: number }).status
+            : undefined,
+      });
+
+      // Duplicate / throttle → continue on verify path (no scary form errors)
+      if (isAuthRateLimitError(error) || isAlreadyRegisteredError(error)) {
         redirect(
           `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
         );
@@ -197,18 +217,33 @@ export async function signUpAction(
       };
     }
 
+    // Supabase returns a user with empty identities when the email is already taken
+    // (and email confirmation is enabled) — treat as "check your email / sign in".
+    const identities = data.user?.identities ?? [];
+    if (data.user && identities.length === 0) {
+      redirect(
+        `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
+      );
+    }
+
     // Ensure profile row exists when a session is available (DB trigger covers signup)
     if (data.user && data.session) {
-      await supabase.from("profiles").upsert(
+      // Do not set role/status here — DB defaults + privilege trigger own those columns.
+      const { error: profileError } = await supabase.from("profiles").upsert(
         {
           id: data.user.id,
           email: parsed.data.email,
           full_name: parsed.data.fullName,
-          role: "user",
-          status: "active",
         },
         { onConflict: "id" },
       );
+
+      if (profileError) {
+        logger.warn("signUpAction profile upsert failed", {
+          message: profileError.message,
+          code: profileError.code,
+        });
+      }
 
       const profile = await getCurrentProfile();
       void notifyAdminEvent({
@@ -228,16 +263,11 @@ export async function signUpAction(
 
     redirect(`/verify-email?email=${encodeURIComponent(parsed.data.email)}`);
   } catch (error) {
-    // rethrow Next.js redirect/notFound control flow
-    if (
-      typeof error === "object" &&
-      error &&
-      "digest" in error &&
-      typeof (error as { digest?: unknown }).digest === "string" &&
-      String((error as { digest: string }).digest).startsWith("NEXT_")
-    ) {
-      throw error;
-    }
+    unstable_rethrow(error);
+
+    logger.error("signUpAction unexpected error", {
+      message: toErrorMessage(error, "unknown"),
+    });
 
     return {
       success: false,

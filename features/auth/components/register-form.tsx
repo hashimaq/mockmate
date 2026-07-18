@@ -95,7 +95,7 @@ export function RegisterForm() {
 
   return (
     <div>
-      <GoogleAuthButton label="Sign up with Google" />
+      <GoogleAuthButton nextPath="/dashboard" label="Sign up with Google" />
       <AuthDivider />
 
       <form action={formAction} className="space-y-4" noValidate>
