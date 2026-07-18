@@ -46,6 +46,15 @@ Authentication → **Providers → Email**
 - “Confirm email” enabled → users must click the link (emails must work)
 - For quick testing only, you can temporarily disable confirm email (not for production)
 
+### If signup shows “Error sending confirmation email” / 500
+
+That comes from Supabase Auth (not MockMate). Built-in mailer is failing.
+
+**Fast unblock (testing):** Auth → Providers → Email → turn **Confirm email** OFF → save  
+**Proper fix:** enable **custom SMTP** (section 3 above) with Resend, then turn Confirm email back ON.
+
+MockMate also has a server fallback: if confirmation email fails and `SUPABASE_SERVICE_ROLE_KEY` is set on Vercel, it creates a confirmed user so signup can still succeed. Still configure SMTP for real verification emails.
+
 ## 5. App “Resend verification” button
 
 `/verify-email` has **Resend verification email**. Use it after SMTP + Site URL are fixed.

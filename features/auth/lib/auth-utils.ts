@@ -35,6 +35,20 @@ export function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
     const trimmed = error.message?.trim();
     if (trimmed && !isOpaqueErrorText(trimmed)) return trimmed;
+    // Some Auth client errors set message to "{}" but keep details elsewhere
+    try {
+      const parsed = JSON.parse(trimmed || "null") as { msg?: unknown; message?: unknown };
+      if (parsed && typeof parsed === "object") {
+        for (const key of ["msg", "message"] as const) {
+          const value = parsed[key];
+          if (typeof value === "string" && !isOpaqueErrorText(value)) {
+            return value.trim();
+          }
+        }
+      }
+    } catch {
+      // not JSON
+    }
   }
 
   if (typeof error === "object") {
@@ -178,10 +192,30 @@ export function isAlreadyRegisteredError(error: unknown): boolean {
   );
 }
 
+/** Supabase Auth failed while sending the confirmation email (SMTP / built-in mailer). */
+export function isConfirmationEmailError(error: unknown): boolean {
+  if (!error) return false;
+  const message = toErrorMessage(error, "").toLowerCase();
+  const status = authErrorStatus(error);
+  if (
+    message.includes("confirmation email") ||
+    message.includes("error sending confirmation") ||
+    message.includes("error sending email")
+  ) {
+    return true;
+  }
+  // GoTrue often returns status 500 + empty/"{}" message for SMTP failures
+  return status === 500 && (!message || isOpaqueErrorText(message));
+}
+
 /** Sign-up specific messages — no scary “security / too many attempts” copy. */
 export function mapSignUpError(error: unknown): string {
   if (isAuthRateLimitError(error) || isAlreadyRegisteredError(error)) {
     return "A verification email may already be on the way. Check your inbox, or sign in if you already registered.";
+  }
+
+  if (isConfirmationEmailError(error)) {
+    return "Could not send the verification email. Configure Supabase SMTP (Resend), or disable Confirm email for testing.";
   }
 
   const status = authErrorStatus(error);
