@@ -3,9 +3,10 @@ import { redirect } from "next/navigation";
 
 import { ResumeRequiredCard } from "@/features/resumes/components/resume-required-card";
 import { ResumePageView } from "@/features/resumes/components/resume-page-view";
+import { captureException } from "@/lib/monitoring/logger";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/services/auth";
-import { ResumeProvider } from "@/services/resumes/resume-provider";
+import type { Resume, ResumeAnalysis } from "@/types/database";
 
 export const metadata: Metadata = {
   title: "Resume",
@@ -24,19 +25,33 @@ export default async function DashboardResumePage({
   }
 
   const params = await searchParams;
-  const supabase = await createClient();
-  const provider = new ResumeProvider(supabase);
-  const payload = await provider.getDashboard(user.id);
-  const showRequiredCard =
-    params.required === "1" && payload.resume === null;
+
+  let resume: Resume | null = null;
+  let analysis: ResumeAnalysis | null = null;
+  let signedUrl: string | null = null;
+
+  try {
+    const { ResumeProvider } = await import(
+      "@/services/resumes/resume-provider"
+    );
+    const supabase = await createClient();
+    const payload = await new ResumeProvider(supabase).getDashboard(user.id);
+    resume = payload.resume;
+    analysis = payload.analysis;
+    signedUrl = payload.signedUrl;
+  } catch (error) {
+    captureException(error, { source: "DashboardResumePage" });
+  }
+
+  const showRequiredCard = params.required === "1" && resume === null;
 
   return (
     <div className="space-y-6">
       {showRequiredCard ? <ResumeRequiredCard /> : null}
       <ResumePageView
-        resume={payload.resume}
-        analysis={payload.analysis}
-        signedUrl={payload.signedUrl}
+        resume={resume}
+        analysis={analysis}
+        signedUrl={signedUrl}
       />
     </div>
   );

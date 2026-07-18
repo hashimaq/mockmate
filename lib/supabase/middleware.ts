@@ -79,14 +79,8 @@ export async function updateSession(request: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
-    const ownerEmail = process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase();
-    const isOwner =
-      !!ownerEmail &&
-      (profile?.email?.trim().toLowerCase() === ownerEmail ||
-        user.email?.trim().toLowerCase() === ownerEmail);
-
     const safeNext = resolvePostAuthPath(
-      isOwner ? "super_admin" : profile?.role,
+      profile?.role,
       request.nextUrl.searchParams.get("next"),
     );
 

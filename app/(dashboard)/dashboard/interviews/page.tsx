@@ -5,12 +5,11 @@ import { InterviewWizard } from "@/features/interviews/components/interview-wiza
 import { InterviewsList } from "@/features/interviews/components/interviews-list";
 import { PageHeader } from "@/features/dashboard/components/page-header";
 import { ResumeAnalyzingCard } from "@/features/resumes/components/resume-analyzing-card";
-import { buildResumeInterviewDefaults } from "@/features/resumes/lib/resume-interview-defaults";
-import { resolveResumeInterviewGate } from "@/features/resumes/lib/resume-interview-gate";
+import { captureException } from "@/lib/monitoring/logger";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/services/auth";
 import { InterviewService } from "@/services/interviews/interview-service";
-import { ResumeProvider } from "@/services/resumes/resume-provider";
+import type { Interview } from "@/types/database";
 
 export const metadata: Metadata = {
   title: "Interviews",
@@ -31,11 +30,25 @@ export default async function InterviewsPage({
   const params = await searchParams;
   const resumeBased = params.mode === "resume";
 
-  const supabase = await createClient();
-  const interviews = await new InterviewService(supabase).listForUser(user.id);
+  let interviews: Interview[] = [];
+  try {
+    const supabase = await createClient();
+    interviews = await new InterviewService(supabase).listForUser(user.id);
+  } catch (error) {
+    captureException(error, { source: "InterviewsPage.listForUser" });
+    interviews = [];
+  }
 
   let resumeWizard: {
-    defaults: ReturnType<typeof buildResumeInterviewDefaults>;
+    defaults: {
+      interviewType: "technical" | "hr" | "behavioral" | "mixed";
+      roleTarget: string;
+      customRole: string;
+      experienceLevel: "intern" | "junior" | "mid" | "senior";
+      difficulty: "easy" | "medium" | "hard";
+      durationPreset: "10" | "20" | "30" | "custom";
+      customDurationMinutes: string;
+    };
     summary: {
       careerLevel: string | null;
       yearsOfExperience: number | null;
@@ -44,53 +57,80 @@ export default async function InterviewsPage({
       programmingLanguages: string[];
     };
   } | null = null;
-  let resumeGate: ReturnType<typeof resolveResumeInterviewGate> | null = null;
+  let showAnalyzing = false;
+  let showFailed = false;
+  let failedMessage: string | null = null;
 
   if (resumeBased) {
-    const { resume, analysis } = await new ResumeProvider(
-      supabase,
-    ).getDashboard(user.id);
-    resumeGate = resolveResumeInterviewGate(resume);
+    try {
+      const { buildResumeInterviewDefaults } = await import(
+        "@/features/resumes/lib/resume-interview-defaults"
+      );
+      const { resolveResumeInterviewGate } = await import(
+        "@/features/resumes/lib/resume-interview-gate"
+      );
+      const { ResumeProvider } = await import(
+        "@/services/resumes/resume-provider"
+      );
+      const supabase = await createClient();
+      const { resume, analysis } = await new ResumeProvider(
+        supabase,
+      ).getDashboard(user.id);
+      const resumeGate = resolveResumeInterviewGate(resume);
 
-    if (resumeGate.state === "missing") {
-      redirect("/dashboard/resume?required=1");
-    }
+      if (resumeGate.state === "missing") {
+        redirect("/dashboard/resume?required=1");
+      }
 
-    if (resumeGate.state === "ready" && analysis) {
-      resumeWizard = {
-        defaults: buildResumeInterviewDefaults(analysis),
-        summary: {
-          careerLevel: analysis.career_level,
-          yearsOfExperience:
-            analysis.years_of_experience === null
-              ? null
-              : Number(analysis.years_of_experience),
-          skills: analysis.skills,
-          frameworks: analysis.frameworks,
-          programmingLanguages: analysis.programming_languages,
-        },
-      };
+      showAnalyzing = resumeGate.state === "processing";
+      showFailed = resumeGate.state === "failed";
+      failedMessage =
+        resumeGate.state === "failed" ? resumeGate.errorMessage : null;
+
+      if (resumeGate.state === "ready" && analysis) {
+        resumeWizard = {
+          defaults: buildResumeInterviewDefaults(analysis),
+          summary: {
+            careerLevel: analysis.career_level,
+            yearsOfExperience:
+              analysis.years_of_experience === null
+                ? null
+                : Number(analysis.years_of_experience),
+            skills: analysis.skills ?? [],
+            frameworks: analysis.frameworks ?? [],
+            programmingLanguages: analysis.programming_languages ?? [],
+          },
+        };
+      }
+    } catch (error) {
+      // redirect() throws — rethrow Next control flow
+      if (
+        typeof error === "object" &&
+        error &&
+        "digest" in error &&
+        typeof (error as { digest?: unknown }).digest === "string" &&
+        String((error as { digest: string }).digest).startsWith("NEXT_")
+      ) {
+        throw error;
+      }
+      captureException(error, { source: "InterviewsPage.resumeMode" });
     }
   }
 
   const showResumeWizard = Boolean(resumeWizard);
-  const showAnalyzing = resumeBased && resumeGate?.state === "processing";
-  const showFailed = resumeBased && resumeGate?.state === "failed";
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Interviews"
-        description="Create a practice session, answer seed questions, and resume anytime. AI generation arrives later without changing this workflow."
+        description="Create a practice session, answer questions, and resume anytime with AI-powered feedback."
       />
 
       {showAnalyzing ? <ResumeAnalyzingCard variant="processing" /> : null}
       {showFailed ? (
         <ResumeAnalyzingCard
           variant="failed"
-          errorMessage={
-            resumeGate?.state === "failed" ? resumeGate.errorMessage : null
-          }
+          errorMessage={failedMessage}
         />
       ) : null}
 

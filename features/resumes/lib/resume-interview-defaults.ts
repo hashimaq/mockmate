@@ -100,9 +100,9 @@ function resolveRole(analysis: ResumeAnalysis): {
   }
 
   const skills = [
-    ...analysis.programming_languages,
-    ...analysis.frameworks,
-    ...analysis.skills,
+    ...(analysis.programming_languages ?? []),
+    ...(analysis.frameworks ?? []),
+    ...(analysis.skills ?? []),
   ]
     .join(" ")
     .toLowerCase();
@@ -125,9 +125,9 @@ function resolveRole(analysis: ResumeAnalysis): {
 
 function defaultInterviewType(analysis: ResumeAnalysis): InterviewType {
   const techSignal =
-    analysis.programming_languages.length +
-    analysis.frameworks.length +
-    analysis.databases.length;
+    (analysis.programming_languages?.length ?? 0) +
+    (analysis.frameworks?.length ?? 0) +
+    (analysis.databases?.length ?? 0);
 
   if (techSignal >= 4) return "technical";
   if ((analysis.soft_skills?.length ?? 0) >= 4) return "behavioral";

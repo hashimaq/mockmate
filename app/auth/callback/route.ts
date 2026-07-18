@@ -130,16 +130,10 @@ export async function GET(request: Request) {
     ? await syncOwnerSuperAdmin(profileRow)
     : null;
 
-  const ownerEmail = process.env.SUPER_ADMIN_EMAIL?.trim().toLowerCase();
-  const isOwner =
-    !!ownerEmail &&
-    (profile?.email?.trim().toLowerCase() === ownerEmail ||
-      data.user.email?.trim().toLowerCase() === ownerEmail);
-
-  const next = resolvePostAuthPath(
-    isOwner ? "super_admin" : profile?.role,
-    requestedNext,
-  );
+  // Use real DB role after sync. Do NOT force owner email → /admin here:
+  // that bounced Google logins (e.g. SUPER_ADMIN_EMAIL) away from /dashboard
+  // when staff role sync lagged or next=/dashboard was requested.
+  const next = resolvePostAuthPath(profile?.role, requestedNext);
 
   if (!existing && profileRow?.created_at) {
     void notifyAdminEvent({

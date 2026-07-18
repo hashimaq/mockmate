@@ -2,11 +2,12 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { captureException } from "@/lib/monitoring/logger";
 import { AIServiceError } from "@/services/ai/ai-service";
 import { ResumeAnalysisService } from "@/services/resumes/resume-analysis-service";
-import { ResumeParser } from "@/services/resumes/resume-parser";
 import {
   RESUME_MAX_BYTES,
+  RESUME_MIME_TYPES,
   type GeminiResumeAnalysis,
   type ResumeContextSummary,
   type ResumeMimeType,
@@ -18,6 +19,10 @@ import type {
   ResumeAnalysis,
   ResumeAnalysisStatus,
 } from "@/types/database";
+
+function isSupportedResumeMime(mime: string): mime is ResumeMimeType {
+  return (RESUME_MIME_TYPES as readonly string[]).includes(mime);
+}
 
 type Client = SupabaseClient<Database>;
 
@@ -90,17 +95,23 @@ export class ResumeService {
   }
 
   async getDashboardPayload(userId: string): Promise<ResumeDashboardPayload> {
-    const resume = await this.getForUser(userId);
-    if (!resume) {
+    try {
+      const resume = await this.getForUser(userId);
+      if (!resume) {
+        return { resume: null, analysis: null, signedUrl: null };
+      }
+
+      const [analysis, signedUrl] = await Promise.all([
+        this.getAnalysisForResume(resume.id, userId),
+        this.storage.createSignedUrl(resume.file_path).catch(() => null),
+      ]);
+
+      return { resume, analysis, signedUrl };
+    } catch (error) {
+      // Missing migration / RLS should not 500 the whole page
+      captureException(error, { source: "ResumeService.getDashboardPayload" });
       return { resume: null, analysis: null, signedUrl: null };
     }
-
-    const [analysis, signedUrl] = await Promise.all([
-      this.getAnalysisForResume(resume.id, userId),
-      this.storage.createSignedUrl(resume.file_path).catch(() => null),
-    ]);
-
-    return { resume, analysis, signedUrl };
   }
 
   async createSignedUrl(userId: string): Promise<string> {
@@ -112,7 +123,7 @@ export class ResumeService {
   }
 
   validateFile(file: File): { mimeType: ResumeMimeType } {
-    if (!ResumeParser.isSupportedMime(file.type)) {
+    if (!isSupportedResumeMime(file.type)) {
       throw new Error("Only PDF and DOCX resumes are supported");
     }
     if (file.size <= 0 || file.size > RESUME_MAX_BYTES) {
@@ -298,10 +309,12 @@ export class ResumeService {
       const blob = await this.storage.download(claimed.file_path);
       const buffer = Buffer.from(await blob.arrayBuffer());
 
-      if (!ResumeParser.isSupportedMime(claimed.mime_type)) {
+      if (!isSupportedResumeMime(claimed.mime_type)) {
         throw new Error("Unsupported resume file type");
       }
 
+      // Lazy-load pdf-parse/mammoth so resume/interview pages don't import them
+      const { ResumeParser } = await import("@/services/resumes/resume-parser");
       const extractedText = await ResumeParser.extractText(
         buffer,
         claimed.mime_type,

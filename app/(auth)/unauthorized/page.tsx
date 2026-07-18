@@ -15,11 +15,11 @@ export default function UnauthorizedPage() {
           <ShieldAlert className="h-6 w-6" aria-hidden />
         </div>
         <p className="text-sm text-muted-foreground">
-          Sign in with an authorized account, or return to the home page.
+          This area is for admins only. You can still use your user dashboard.
         </p>
         <div className="mt-6 flex w-full flex-col gap-2 sm:flex-row">
           <Button asChild className="flex-1">
-            <Link href="/login">Sign in</Link>
+            <Link href="/dashboard">Go to dashboard</Link>
           </Button>
           <Button asChild variant="outline" className="flex-1">
             <Link href="/">Go home</Link>

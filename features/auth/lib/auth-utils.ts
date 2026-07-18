@@ -260,8 +260,10 @@ export function getSafeRedirectPath(
 
 /**
  * Role-aware post-login destination.
- * Staff always land in /admin unless `next` is already a safe admin path.
- * Users never land in /admin.
+ * - Explicit `/dashboard` (or other user-app paths) is honored even for staff
+ *   so Google sign-in can open the user app when requested.
+ * - Otherwise staff default to `/admin`, users to `/dashboard`.
+ * - Users never land in `/admin`.
  */
 export function resolvePostAuthPath(
   role: string | null | undefined,
@@ -269,6 +271,11 @@ export function resolvePostAuthPath(
 ): string {
   const home = isStaffRole(role) ? "/admin" : "/dashboard";
   const requested = getSafeRedirectPath(requestedNext, home);
+
+  // Google / explicit "go to user app" should not be overridden by staff home
+  if (isUserAppPath(requested)) {
+    return requested;
+  }
 
   if (isStaffRole(role)) {
     return isAdminPath(requested) ? requested : home;

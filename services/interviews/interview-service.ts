@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { CreateInterviewInput } from "@/features/interviews/schemas/interview";
 import { resolveDurationMinutes } from "@/features/interviews/schemas/interview";
+import { captureException } from "@/lib/monitoring/logger";
 import type { Database, Interview } from "@/types/database";
 
 type Client = SupabaseClient<Database>;
@@ -28,7 +29,9 @@ export class InterviewService {
       .limit(limit);
 
     if (error) {
-      throw new Error(error.message);
+      // Soft-fail for dashboard list (missing table/RLS) — create still throws
+      captureException(error, { source: "InterviewService.listForUser" });
+      return [];
     }
 
     return data ?? [];
