@@ -51,17 +51,43 @@ export function mapAuthError(error: { message?: string; code?: string } | null):
     return "Network error. Check your connection and try again.";
   }
 
-  if (
-    message.includes("rate limit") ||
-    message.includes("too many") ||
-    message.includes("security purposes") ||
-    code === "over_request_rate_limit" ||
-    code === "over_email_send_rate_limit"
-  ) {
-    return "Too many attempts for security. Please wait about a minute, then try again.";
+  if (isAuthRateLimitError(error)) {
+    return "Please wait a moment, then try again.";
   }
 
   return error.message;
+}
+
+/** Supabase email/auth throttle (common on repeated sign-up email sends). */
+export function isAuthRateLimitError(
+  error: { message?: string; code?: string } | null,
+): boolean {
+  if (!error) return false;
+  const message = (error.message ?? "").toLowerCase();
+  const code = (error.code ?? "").toLowerCase();
+  return (
+    message.includes("rate limit") ||
+    message.includes("too many") ||
+    message.includes("security purposes") ||
+    message.includes("only request this after") ||
+    code === "over_request_rate_limit" ||
+    code === "over_email_send_rate_limit"
+  );
+}
+
+/** Sign-up specific messages — no scary “security / too many attempts” copy. */
+export function mapSignUpError(
+  error: { message?: string; code?: string } | null,
+): string {
+  if (!error?.message) {
+    return "Could not create your account. Please try again.";
+  }
+
+  if (isAuthRateLimitError(error)) {
+    return "A verification email may already be on the way. Check your inbox, or sign in if you already registered.";
+  }
+
+  return mapAuthError(error);
 }
 
 /** Collect first Zod issue per field for inline form errors. */

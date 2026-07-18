@@ -5,7 +5,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import {
+  isAuthRateLimitError,
   mapAuthError,
+  mapSignUpError,
   REMEMBER_ME_COOKIE,
   resolvePostAuthPath,
   zodFieldErrors,
@@ -167,9 +169,16 @@ export async function signUpAction(
   });
 
   if (error) {
+    // Email send throttle — send user to verify screen instead of a scary error
+    if (isAuthRateLimitError(error)) {
+      redirect(
+        `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
+      );
+    }
+
     return {
       success: false,
-      error: mapAuthError(error),
+      error: mapSignUpError(error),
       fields: {
         fullName: parsed.data.fullName,
         email: parsed.data.email,
