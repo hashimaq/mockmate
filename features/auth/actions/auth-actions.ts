@@ -21,7 +21,7 @@ import {
   updatePasswordSchema,
   updateProfileSchema,
 } from "@/features/auth/schemas/auth";
-import { SITE_URL } from "@/lib/constants";
+import { getAppOrigin } from "@/lib/app-origin";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/services/auth";
@@ -156,6 +156,7 @@ export async function signUpAction(
     };
   }
 
+  const origin = await getAppOrigin();
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -164,13 +165,20 @@ export async function signUpAction(
       data: {
         full_name: parsed.data.fullName,
       },
-      emailRedirectTo: `${SITE_URL}/auth/callback?next=/dashboard`,
+      emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
     },
   });
 
   if (error) {
-    // Email send throttle — send user to verify screen instead of a scary error
-    if (isAuthRateLimitError(error)) {
+    const message = (error.message ?? "").toLowerCase();
+    // Email already used / confirmation throttle → never show wait/security errors
+    if (
+      isAuthRateLimitError(error) ||
+      message.includes("security purposes") ||
+      message.includes("only request this after") ||
+      message.includes("already registered") ||
+      message.includes("already been registered")
+    ) {
       redirect(
         `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
       );
@@ -233,9 +241,10 @@ export async function forgotPasswordAction(
     };
   }
 
+  const origin = await getAppOrigin();
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${SITE_URL}/auth/callback?next=/reset-password`,
+    redirectTo: `${origin}/auth/callback?next=/reset-password`,
   });
 
   if (error) {
@@ -245,6 +254,48 @@ export async function forgotPasswordAction(
   return {
     success: true,
     message: "If an account exists for that email, a reset link has been sent.",
+  };
+}
+
+export async function resendVerificationEmailAction(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return { success: false, error: "Enter a valid email address." };
+  }
+
+  const origin = await getAppOrigin();
+  const supabase = await createClient();
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email,
+    options: {
+      emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
+    },
+  });
+
+  if (error) {
+    if (isAuthRateLimitError(error)) {
+      return {
+        success: false,
+        error:
+          "Email provider is throttling sends. Wait a couple of minutes, check spam, or configure Supabase SMTP (Resend).",
+        fields: { email },
+      };
+    }
+    return {
+      success: false,
+      error: mapAuthError(error),
+      fields: { email },
+    };
+  }
+
+  return {
+    success: true,
+    message: "Verification email sent. Check your inbox and spam folder.",
+    fields: { email },
   };
 }
 
