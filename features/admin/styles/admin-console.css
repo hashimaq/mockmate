@@ -1,0 +1,93 @@
+/* Admin console — inherits MockMate theme tokens (light + dark) */
+.admin-console {
+  --admin-bg: var(--background);
+  --admin-sidebar: var(--card);
+  --admin-panel: var(--card);
+  --admin-panel-muted: var(--muted);
+  --admin-border: var(--border);
+  --admin-text: var(--foreground);
+  --admin-muted: var(--muted-foreground);
+  --admin-accent: var(--primary);
+  --admin-accent-soft: color-mix(in oklab, var(--primary) 14%, transparent);
+  --admin-accent-fg: var(--primary-foreground);
+  --admin-danger: var(--destructive);
+  --admin-warning: oklch(0.7 0.14 70);
+  --admin-ok: var(--primary);
+  --admin-sidebar-fg: var(--foreground);
+  --admin-sidebar-muted: var(--muted-foreground);
+  --admin-sidebar-border: var(--border);
+  --admin-sidebar-hover: var(--accent);
+  --admin-link: var(--primary);
+
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      900px 420px at 12% -10%,
+      var(--hero-glow),
+      transparent 55%
+    ),
+    var(--background);
+  color: var(--admin-text);
+  font-family: var(--font-plus-jakarta, var(--font-sans), ui-sans-serif, system-ui, sans-serif);
+}
+
+.admin-console a {
+  text-underline-offset: 3px;
+}
+
+.admin-console .admin-sidebar {
+  background: color-mix(in oklab, var(--card) 92%, var(--primary) 8%);
+  color: var(--admin-sidebar-fg);
+  border-color: var(--admin-sidebar-border);
+  backdrop-filter: blur(12px);
+}
+
+.admin-console .admin-nav-section {
+  color: var(--admin-sidebar-muted);
+}
+
+.admin-console .admin-nav-link {
+  color: var(--admin-sidebar-muted);
+}
+
+.admin-console .admin-nav-link:hover {
+  background: var(--admin-sidebar-hover);
+  color: var(--accent-foreground);
+}
+
+.admin-console .admin-nav-link[aria-current="page"] {
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+  font-weight: 600;
+}
+
+.admin-console .admin-header {
+  background: color-mix(in oklab, var(--background) 86%, transparent);
+  border-color: var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.admin-console .admin-btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.admin-console .admin-btn-primary:hover {
+  filter: brightness(0.96);
+}
+
+.admin-console .admin-link {
+  color: var(--primary);
+}
+
+.admin-console .admin-link:hover {
+  text-decoration: underline;
+}
+
+.dark .admin-console .admin-sidebar {
+  background: color-mix(in oklab, var(--card) 88%, var(--primary) 12%);
+}
+
+.dark .admin-console {
+  --admin-warning: oklch(0.78 0.12 75);
+}
