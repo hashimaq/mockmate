@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Briefcase,
@@ -146,6 +147,7 @@ export function InterviewWizard({
   initialValues,
   resumeSummary,
 }: InterviewWizardProps = {}) {
+  const router = useRouter();
   const reduceMotion = useReducedMotion();
   const [step, setStep] = useState(0);
   const [state, setState] = useState<WizardState>(() => ({
@@ -224,11 +226,12 @@ export function InterviewWizard({
     setIsGenerating(true);
     try {
       const result = await createInterviewAction(payload);
-      if (!result.success) {
+      if (!result.success || !result.sessionId) {
         toast.error(result.error ?? "Could not start interview");
         setIsGenerating(false);
+        return;
       }
-      // On success the action redirects — keep overlay until navigation.
+      router.push(`/dashboard/interviews/${result.sessionId}`);
     } catch {
       toast.error("Could not start interview");
       setIsGenerating(false);

@@ -2,7 +2,6 @@
 
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
 import {
   createInterviewSchema,
@@ -156,7 +155,9 @@ export async function createInterviewAction(
 
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/interviews");
-    redirect(`/dashboard/interviews/${interview.id}`);
+    // Return session id — client navigates. Avoid redirect() which clients
+    // often catch as a false "Could not start interview" error.
+    return { success: true, sessionId: interview.id };
   } catch (error) {
     if (isNextRedirectError(error)) {
       throw error;

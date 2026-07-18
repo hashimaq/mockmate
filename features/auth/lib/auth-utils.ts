@@ -60,14 +60,14 @@ export function toErrorMessage(error: unknown, fallback: string): string {
     if (code) {
       return code.replace(/_/g, " ");
     }
-
-    const status = authErrorStatus(error);
-    if (status) {
-      return `Request failed (${status}). Please try again.`;
-    }
   }
 
   return fallback;
+}
+
+/** Exported for signup recovery when Auth returns opaque 5xx. */
+export function getAuthErrorStatus(error: unknown): number | null {
+  return authErrorStatus(error);
 }
 
 /**
@@ -184,8 +184,17 @@ export function mapSignUpError(error: unknown): string {
     return "A verification email may already be on the way. Check your inbox, or sign in if you already registered.";
   }
 
+  const status = authErrorStatus(error);
+  if (status !== null && status >= 500) {
+    return "Account service hit a temporary error (often email delivery). Try again, or sign in if the account was created.";
+  }
+
   const mapped = mapAuthError(error);
-  if (!mapped || isOpaqueErrorText(mapped)) {
+  if (
+    !mapped ||
+    isOpaqueErrorText(mapped) ||
+    /^request failed \(\d+\)/i.test(mapped)
+  ) {
     return "Could not create your account. If you already registered, sign in or open the verification email.";
   }
   return mapped;

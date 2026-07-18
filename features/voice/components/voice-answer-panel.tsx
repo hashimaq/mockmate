@@ -88,10 +88,15 @@ export function VoiceAnswerPanel({
         setInterim(text);
       },
       onFinal: (text: string) => {
+        // Dedupe happens in TranscriptService.append (Chrome restart re-emits)
         const next = voiceRef.current!.appendTranscript(
           committedRef.current,
           text,
         );
+        if (next === committedRef.current) {
+          setInterim("");
+          return;
+        }
         committedRef.current = next;
         onChange(next);
         setInterim("");
@@ -320,8 +325,8 @@ export function VoiceAnswerPanel({
         disabled={disabled}
       />
       <p id="voice-answer-help" className="text-xs text-muted-foreground">
-        Live transcript becomes your answer. Edit, delete, or append more speech
-        anytime. Autosave still runs.
+        Live transcript becomes your answer. Mute “Read Question Aloud” while
+        recording so the mic does not pick up the speaker. Autosave still runs.
       </p>
     </div>
   );

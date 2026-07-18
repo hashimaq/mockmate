@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 
 import {
+  getAuthErrorStatus,
   isAlreadyRegisteredError,
   isAuthRateLimitError,
   mapAuthError,
@@ -182,6 +183,7 @@ export async function signUpAction(
     });
 
     if (error) {
+      const status = getAuthErrorStatus(error);
       logger.warn("signUpAction auth error", {
         message: toErrorMessage(error, ""),
         code:
@@ -191,13 +193,7 @@ export async function signUpAction(
           typeof (error as { code?: unknown }).code === "string"
             ? (error as { code: string }).code
             : undefined,
-        status:
-          typeof error === "object" &&
-          error &&
-          "status" in error &&
-          typeof (error as { status?: unknown }).status === "number"
-            ? (error as { status: number }).status
-            : undefined,
+        status: status ?? undefined,
       });
 
       // Duplicate / throttle → continue on verify path (no scary form errors)
@@ -205,6 +201,33 @@ export async function signUpAction(
         redirect(
           `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
         );
+      }
+
+      // Auth 5xx often means user was created but confirmation email failed (SMTP).
+      // Recover: try sign-in; if email-not-confirmed → verify page instead of hard fail.
+      if (status !== null && status >= 500) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: parsed.data.email,
+          password: parsed.data.password,
+        });
+        if (!signInError) {
+          const profile = await getCurrentProfile();
+          void notifyAdminEvent({
+            type: "user_registered",
+            userName: parsed.data.fullName,
+            userEmail: parsed.data.email,
+          });
+          redirect(getHomePathForRole(profile?.role));
+        }
+        const signInMsg = toErrorMessage(signInError, "").toLowerCase();
+        if (
+          signInMsg.includes("email not confirmed") ||
+          signInMsg.includes("not confirmed")
+        ) {
+          redirect(
+            `/verify-email?email=${encodeURIComponent(parsed.data.email)}`,
+          );
+        }
       }
 
       return {
@@ -271,10 +294,7 @@ export async function signUpAction(
 
     return {
       success: false,
-      error: toErrorMessage(
-        error,
-        "Could not create your account. Please try again.",
-      ),
+      error: mapSignUpError(error),
       fields: { fullName, email },
     };
   }

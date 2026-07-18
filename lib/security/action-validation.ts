@@ -37,21 +37,38 @@ export function toSafeClientError(
   const message = error.message;
   const lower = message.toLowerCase();
 
+  // Secrets / infra — never expose raw details
   if (
     lower.includes("api key") ||
-    lower.includes("gemini") ||
-    lower.includes("quota") ||
-    lower.includes("permission") ||
     lower.includes("service role") ||
     lower.includes("supabase")
   ) {
-    if (lower.includes("rate limit")) {
-      return "Too many AI requests. Please wait a moment and try again.";
-    }
     if (lower.includes("api key") || lower.includes("not configured")) {
       return "AI is temporarily unavailable. Please try again later.";
     }
     return fallback;
+  }
+
+  if (lower.includes("rate limit") || lower.includes("quota")) {
+    return "Too many AI requests. Please wait a moment and try again.";
+  }
+
+  // Gemini / AI failures — clear retry copy (do not blank all "gemini" strings)
+  if (
+    lower.includes("gemini") ||
+    lower.includes("empty response") ||
+    lower.includes("failed validation") ||
+    lower.includes("invalid json") ||
+    lower.includes("parse") ||
+    lower.includes("ai ")
+  ) {
+    if (lower.includes("did not return") || lower.includes("empty")) {
+      return "AI returned an empty response. Please generate the report again.";
+    }
+    if (lower.includes("validation") || lower.includes("json")) {
+      return "AI returned an incomplete report. Please generate again.";
+    }
+    return "AI report generation failed. Please try again in a moment.";
   }
 
   // Allow known user-facing validation / domain messages
@@ -68,9 +85,10 @@ export function toSafeClientError(
     lower.includes("resume") ||
     lower.includes("5 mb") ||
     lower.includes("extract") ||
-    lower.includes("analysis")
+    lower.includes("analysis") ||
+    lower.includes("report")
   ) {
-    return message;
+    return message.length > 180 ? message.slice(0, 177) + "…" : message;
   }
 
   if (message.length > 180) {

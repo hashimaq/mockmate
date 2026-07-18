@@ -168,12 +168,25 @@ export class ReportGenerationService {
         reportReady: true,
       };
     } catch (error) {
-      const message =
+      const raw =
         error instanceof AIServiceError
           ? error.message
           : error instanceof Error
             ? error.message
             : "Report generation failed";
+      const lower = raw.toLowerCase();
+      const message =
+        lower.includes("api key") || lower.includes("not configured")
+          ? "AI is not configured on the server. Add GEMINI_API_KEY and retry."
+          : lower.includes("empty")
+            ? "AI returned an empty report. Please try Generate Report Again."
+            : lower.includes("validation") || lower.includes("json")
+              ? "AI returned an incomplete report. Please try Generate Report Again."
+              : lower.includes("rate") || lower.includes("quota")
+                ? "AI rate limit hit. Wait a minute, then try Generate Report Again."
+                : raw.length > 160
+                  ? "Report generation failed. Please try again."
+                  : raw;
 
       await this.reports.markFailed(interviewId, userId, message);
 
